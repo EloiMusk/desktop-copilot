@@ -12,6 +12,7 @@ Attribute App.VB_VarHelpID = -1
 Public WithEvents Doc As Word.Document
 Attribute Doc.VB_VarHelpID = -1
 
+Public mainTriggered As Boolean
 Public completionLength As Integer
 Public startPos As Integer
 Public tabKey As KeyBinding
@@ -32,6 +33,7 @@ Private Sub App_WindowActivate(ByVal Doc As Document, ByVal Wn As Window)
 End Sub
 
 Private Sub App_WindowDeactivate(ByVal Doc As Document, ByVal Wn As Window)
+    Debug.Print "WindowDeavtivate"
     resetCompletion
     enabled = False
 End Sub
@@ -39,6 +41,7 @@ End Sub
 
 Private Sub App_WindowSelectionChange _
     (ByVal Sel As Selection)
+    Debug.Print "Selection Changed"
     originalSelection(0) = Sel.start
     originalSelection(1) = Sel.End
     resetCompletion True
@@ -48,7 +51,7 @@ End Sub
 Public Function resetCompletion(Optional bySelection As Boolean = False)
     Debug.Print "Reseting Completion"
     MakeRequest "http://localhost:5000/stop", "POST", ""
-    
+    mainTriggered = False
     If IsMissing(bySelection) Or bySelection = False Then
         startPos = Selection.start
     End If
@@ -66,9 +69,15 @@ Public Function resetCompletion(Optional bySelection As Boolean = False)
     
     If Not completionLength = 0 Then
         Dim delRange As Range
-        Selection.SetRange startPos, (startPos + completionLength)
-        Set delRange = Selection.Range.Duplicate
+        'Selection.SetRange
+        Set delRange = Selection.Range
+        delRange.SetRange startPos, (startPos + completionLength)
         delRange.Delete
+        
+        ' Delete newline character if it exists after the completion text
+        If Not delRange.Characters.Last.Next = vbCr Then
+            delRange.Characters.Last.InsertBefore vbCr
+        End If
     End If
    
     

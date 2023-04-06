@@ -181,17 +181,36 @@ Public Function GetCurrentPageText() As String
     GetCurrentPageText = pageText
 End Function
 
-Sub changeDetector()
-    Dim currentHash As String
-    currentHash = MD5(GetCurrentPageText())
-    If currentHash = lastHash Then
-        Application.OnTime Now() + TimeValue("00:00:01"), "changeDetector"
+Private Function pageChanged() As Boolean
+    If currentHash() = lastHash Then
+        pageChanged = False
     Else
-        Debug.Print "Change Detected"
-        X.resetCompletion
+        pageChanged = True
+    End If
+    lastHash = currentHash()
+End Function
+
+Private Function currentHash() As String
+    currentHash = MD5(GetCurrentPageText())
+End Function
+
+Sub TriggerMain()
+    If pageChanged() Then
+        Debug.Print "Changes detected"
+        X.idleTime = Now()
+        
+    End If
+    ' Check if the user has been idle for 3 seconds
+    If Now() - X.idleTime >= TimeValue("00:00:03") And Not X.mainTriggered = True And X.enabled = True Then
+        ' Call the Main subroutine
+        main
+        X.mainTriggered = True
+        Debug.Print "Main triggered"
+        Application.OnTime Now() + TimeValue("00:00:03"), "TriggerMain"
+    Else
+        ' Schedule TriggerMain to run again in 1 second
         Application.OnTime Now() + TimeValue("00:00:01"), "TriggerMain"
     End If
-    lastHash = currentHash
 End Sub
 Private Sub Document_Open()
     Register_Event_Handler
@@ -225,24 +244,11 @@ Private Sub Document_Open()
     
     ' Set the idle time to the current time
     X.idleTime = Now()
+    X.mainTriggered = False
     
     ' Start timer to call ChangeDetector
-    Application.Run "changeDetector"
+    Application.Run "TriggerMain"
 End Sub
-
-Sub TriggerMain()
-    ' Check if the user has been idle for 3 seconds
-    If Now() - X.idleTime >= TimeValue("00:00:03") And X.enabled Then
-        ' Call the Main subroutine
-        Main
-        Debug.Print "Main triggered"
-        Application.Run "changeDetector"
-    Else
-        ' Schedule TriggerMain to run again in 1 second
-        Application.OnTime Now() + TimeValue("00:00:01"), "TriggerMain"
-    End If
-End Sub
-
 
 Function GetKeyName(ByVal keyCode As WdKey, keyName) As String
     
@@ -258,14 +264,23 @@ Function GetKeyName(ByVal keyCode As WdKey, keyName) As String
         Debug.Print "Unable to get key name"
     End If
 End Function
-
+Public Function RemoveTrailingNewline(str As String) As String
+    Dim regExp As Object
+    Set regExp = CreateObject("vbscript.regexp")
+    Dim pattern As String
+    pattern = "(\\r|\\n)*$"
+    With regExp
+    .pattern = pattern
+    .Global = True
+    RemoveTrailingNewline = .Replace(str, "")
+End With
+End Function
 
 
 Sub AutoComplete(completion As String)
-
     Dim newRange As Range
     Set newRange = Selection.Range
-    newRange.InsertAfter completion
+    newRange.InsertAfter RemoveTrailingNewline(completion)
     X.completionLength = newRange.End - newRange.start
     X.startPos = newRange.start
     
@@ -276,7 +291,7 @@ Sub AutoComplete(completion As String)
     Set kb = Application.keyBindings
     
 
-    Set X.escKey = kb.Add(KeyCategory:=wdKeyCategoryMacro, keyCode:=BuildKeyCode(Arg1:=wdKeyAlt, Arg2:=wdKeyF15), _
+    Set X.escKey = kb.Add(KeyCategory:=wdKeyCategoryMacro, keyCode:=BuildKeyCode(Arg1:=wdKeyControl, Arg2:=wdKeyF15), _
     Command:="ClearCompletion")
     ' Add a key binding for the Tab key
     If Not Application.keyBindings.Key(BuildKeyCode(wdKeyTab)) Is Nothing Then
@@ -287,6 +302,7 @@ Sub AutoComplete(completion As String)
     'If X.addedRange.Paragraphs.Last.ID = Selection.Range.Paragraphs.Last.ID Then
        ' Call waitForChange
     'End If
+    lastHash = MD5(GetCurrentPageText())
 End Sub
 
 Sub ClearCompletion()
@@ -298,9 +314,11 @@ Sub Complete()
     Application.keyBindings.Key(BuildKeyCode(wdKeyTab)).Clear
     X.escKey.Clear
     MakeRequest "http://localhost:5000/stop", "POST", ""
+    X.mainTriggered = False
+    X.idleTime = Now()
 End Sub
 
-Public Sub Main()
+Public Sub main()
     ' Get the fragments and last two sentences
     Dim fragArray() As String
     Dim lastWritten As String
@@ -333,7 +351,7 @@ Public Sub Main()
     Set jsonResponse = ParseJson(request.responseText)("data")
     ' Display the response in a message box
     AutoComplete (jsonResponse("lastWritten"))
-    lastHash = MD5(GetCurrentPageText)
+    lastHash = currentHash()
 End Sub
 
 
