@@ -20,6 +20,7 @@ Public escKey As KeyBinding
 Public idleTime As Date
 Private originalSelection(2) As Integer
 Public enabled As Boolean
+Public font As font
 
 Private Sub App_DocumentBeforeSave(ByVal Doc As Document, SaveAsUI As Boolean, Cancel As Boolean)
     Debug.Print "Before Save"
@@ -42,6 +43,7 @@ End Sub
 Private Sub App_WindowSelectionChange _
     (ByVal Sel As Selection)
     Debug.Print "Selection Changed"
+    enabled = True
     originalSelection(0) = Sel.start
     originalSelection(1) = Sel.End
     resetCompletion True
@@ -50,14 +52,43 @@ End Sub
 
 Public Function resetCompletion(Optional bySelection As Boolean = False)
     Debug.Print "Reseting Completion"
-    MakeRequest "http://localhost:5000/stop", "POST", ""
-    mainTriggered = False
+
     If IsMissing(bySelection) Or bySelection = False Then
         startPos = Selection.start
     End If
     
     
+    If Not completionLength = 0 Then
+        Dim delRange As Range
+        Set delRange = Selection.Range
+        delRange.SetRange startPos, (startPos + completionLength)
+        delRange.font = font
+        delRange.Delete
+    End If
+   
+    
+    If Not IsMissing(bySelection) And bySelection = True Then
+        Selection.SetRange originalSelection(0), originalSelection(1)
+    End If
+    
+    If Not font Is Nothing Then
+        Selection.Paragraphs.Last.Range.font = font
+    End If
+    
+    resetParams
+End Function
+
+Public Function resetParams()
+    MakeRequest "http://localhost:5000/stop", "POST", ""
+
+    
+    mainTriggered = False
+    originalSelection(0) = Selection.start
+    originalSelection(1) = Selection.End
+    completionLength = 0
+    startPos = Selection.start
     idleTime = Now()
+    
     If Not tabKey Is Nothing Then
         tabKey.Clear
     End If
@@ -65,29 +96,6 @@ Public Function resetCompletion(Optional bySelection As Boolean = False)
     If Not escKey Is Nothing Then
         escKey.Clear
     End If
-    
-    
-    If Not completionLength = 0 Then
-        Dim delRange As Range
-        'Selection.SetRange
-        Set delRange = Selection.Range
-        delRange.SetRange startPos, (startPos + completionLength)
-        delRange.Delete
-        
-        ' Delete newline character if it exists after the completion text
-        If Not delRange.Characters.Last.Next = vbCr Then
-            delRange.Characters.Last.InsertBefore vbCr
-        End If
-    End If
-   
-    
-    If Not IsMissing(bySelection) And bySelection = True Then
-        Selection.SetRange originalSelection(0), originalSelection(1)
-    End If
-    originalSelection(0) = Selection.start
-    originalSelection(1) = Selection.End
-    completionLength = 0
-    startPos = Selection.start
 End Function
 
 Private Sub Doc_ContentControlBeforeStoreUpdate(ByVal ContentControl As ContentControl, Content As String)

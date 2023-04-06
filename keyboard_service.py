@@ -22,8 +22,8 @@ class KeyboardService:
     def on_press(self, key):
         try:
             self.stop()
-            print("Pressing keys")
-            with self.controller.pressed(Key.ctrl):
+            if not key == Key.tab:
+                print("Pressing keys")
                 self.controller.press(Key.f15)
                 self.controller.release(Key.f15)
 

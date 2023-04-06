@@ -94,6 +94,9 @@ Public Function MD5(ByVal sIn As String, Optional bB64 As Boolean = 0) As String
     'Test with empty string input:
     'Hex:   d41d8cd98f00...etc
     'Base-64: 1B2M2Y8Asg...etc
+    If sIn = "" Then
+        sIn = "123"
+    End If
         
     Dim oT As Object, oMD5 As Object
     Dim TextToHash() As Byte
@@ -194,6 +197,14 @@ Private Function currentHash() As String
     currentHash = MD5(GetCurrentPageText())
 End Function
 
+Private Function textSelected() As Boolean
+    If Selection.start < Selection.End Then
+        textSelected = True
+    Else
+        textSelected = False
+    End If
+End Function
+
 Sub TriggerMain()
     If pageChanged() Then
         Debug.Print "Changes detected"
@@ -201,7 +212,7 @@ Sub TriggerMain()
         
     End If
     ' Check if the user has been idle for 3 seconds
-    If Now() - X.idleTime >= TimeValue("00:00:03") And Not X.mainTriggered = True And X.enabled = True Then
+    If Now() - X.idleTime >= TimeValue("00:00:03") And Not X.mainTriggered = True And X.enabled = True And textSelected = False Then
         ' Call the Main subroutine
         main
         X.mainTriggered = True
@@ -245,13 +256,13 @@ Private Sub Document_Open()
     ' Set the idle time to the current time
     X.idleTime = Now()
     X.mainTriggered = False
+    X.enabled = True
     
     ' Start timer to call ChangeDetector
     Application.Run "TriggerMain"
 End Sub
 
 Function GetKeyName(ByVal keyCode As WdKey, keyName) As String
-    
     Dim bufSize As Long
     Dim bufPtr As String
     
@@ -283,6 +294,10 @@ Sub AutoComplete(completion As String)
     newRange.InsertAfter RemoveTrailingNewline(completion)
     X.completionLength = newRange.End - newRange.start
     X.startPos = newRange.start
+    Set X.font = Selection.font.Duplicate
+    With newRange.font
+            .ColorIndex = wdGray50
+    End With
     
     MakeRequest "http://localhost:5000/start", "POST", ""
     
@@ -291,7 +306,7 @@ Sub AutoComplete(completion As String)
     Set kb = Application.keyBindings
     
 
-    Set X.escKey = kb.Add(KeyCategory:=wdKeyCategoryMacro, keyCode:=BuildKeyCode(Arg1:=wdKeyControl, Arg2:=wdKeyF15), _
+    Set X.escKey = kb.Add(KeyCategory:=wdKeyCategoryMacro, keyCode:=BuildKeyCode(wdKeyF15), _
     Command:="ClearCompletion")
     ' Add a key binding for the Tab key
     If Not Application.keyBindings.Key(BuildKeyCode(wdKeyTab)) Is Nothing Then
@@ -311,11 +326,12 @@ Sub ClearCompletion()
 End Sub
 
 Sub Complete()
-    Application.keyBindings.Key(BuildKeyCode(wdKeyTab)).Clear
-    X.escKey.Clear
-    MakeRequest "http://localhost:5000/stop", "POST", ""
-    X.mainTriggered = False
-    X.idleTime = Now()
+    Dim endPos As Integer
+    endPos = Selection.start + X.completionLength
+    X.resetParams
+    Selection.SetRange Selection.start, endPos
+    Selection.Range.font = X.font
+    Selection.Collapse wdCollapseEnd
 End Sub
 
 Public Sub main()
