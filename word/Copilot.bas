@@ -3,24 +3,28 @@ Option Explicit
 
 Private Declare PtrSafe Function GetKeyNameText Lib "user32" Alias "GetKeyNameTextA" (ByVal lParam As Long, ByVal lpString As String, ByVal nSize As Integer) As Long
 
+Dim ui As New Copilot_Ui
+Dim isRunning As Boolean
 Dim lastHash As String
 Dim originalAddedRange As Range
 Dim X As New EventClassModule
+
 
 Public Sub Register_Event_Handler()
  Set X.App = Word.Application
  Set X.Doc = Word.ActiveDocument
 End Sub
 
+
 Private Sub GetFragmentsAndLastTwoSentences(fragArray, lastWritten)
     Dim Doc As Document
     Set Doc = ActiveDocument
     Dim fragCount As Integer
     fragCount = 0
-    Dim Sel As Range
-    Set Sel = Selection.Range
+    Dim sel As Range
+    Set sel = Selection.Range
     Dim lastTwoSentences As String
-    lastWritten = Sel.Paragraphs.Last.Range.Text
+    lastWritten = sel.Paragraphs.Last.Range.Text
     Dim para As Paragraph
     For Each para In Doc.Paragraphs
         Dim frag As Range
@@ -120,12 +124,12 @@ Public Function MD5(ByVal sIn As String, Optional bB64 As Boolean = 0) As String
 End Function
 
 Function GetLastParagraph() As String
-    Dim Sel As Range
-    Set Sel = Selection.Range
-    
+    Dim sel As Range
+    Set sel = Selection.Range
 End Function
 
 Function MakeRequest(url As String, method As String, body As String) As String
+    On Error GoTo ErrHandler
     Dim xhr As Object
     Set xhr = CreateObject("MSXML2.XMLHTTP")
     
@@ -138,6 +142,12 @@ Function MakeRequest(url As String, method As String, body As String) As String
     Else
         MakeRequest = ""
     End If
+    Exit Function
+ErrHandler:
+    MsgBox "Failed making request to: " & url & " Make sure the backend is running"
+    MakeRequest = ""
+    X.Enabled = False
+    X.buttonState = False
 End Function
 
 
@@ -148,13 +158,13 @@ Function GetUID() As String
     Dim prop As DocumentProperty
     For Each prop In props
         If prop.Name = "copilot_uid" And prop.Type = msoPropertyTypeString Then
-            uid = prop.Value
+            uid = prop.value
         End If
     Next
     If uid = "" Then
         ' Generate a new UID and store it in the copilot_uid property
         uid = Format(Date, "yyyymmdd") & "-" & Format(Time, "hhmmss")
-        props.Add Name:="copilot_uid", LinkToContent:=False, Type:=msoPropertyTypeString, Value:=uid
+        props.Add Name:="copilot_uid", LinkToContent:=False, Type:=msoPropertyTypeString, value:=uid
     End If
     
     ' Return the UID
@@ -197,25 +207,20 @@ Private Function currentHash() As String
     currentHash = MD5(GetCurrentPageText())
 End Function
 
-Private Function textSelected() As Boolean
-    If Selection.start < Selection.End Then
-        textSelected = True
-    Else
-        textSelected = False
-    End If
-End Function
-
 Sub TriggerMain()
+    updateUi
+    If X.buttonState = False Then
+     Exit Sub
+    End If
     If pageChanged() Then
         Debug.Print "Changes detected"
         X.idleTime = Now()
-        
     End If
     ' Check if the user has been idle for 3 seconds
-    If Now() - X.idleTime >= TimeValue("00:00:03") And Not X.mainTriggered = True And X.enabled = True And textSelected = False Then
+    If Now() - X.idleTime >= TimeValue("00:00:03") And Not X.mainTriggered = True And X.Enabled = True And X.textSelected(Selection) = False And X.buttonState = True Then
         ' Call the Main subroutine
         main
-        X.mainTriggered = True
+        'X.mainTriggered = True
         Debug.Print "Main triggered"
         Application.OnTime Now() + TimeValue("00:00:03"), "TriggerMain"
     Else
@@ -223,12 +228,21 @@ Sub TriggerMain()
         Application.OnTime Now() + TimeValue("00:00:01"), "TriggerMain"
     End If
 End Sub
-Private Sub Document_Open()
-    Register_Event_Handler
-    ' Generate a UID for the document
+Public Sub toggle()
+    X.buttonState = Not X.buttonState
+    X.resetCompletion
+    If Not isRunning Then
+        EntryPoint
+    End If
+    If X.buttonState = True Then
+        Application.Run "TriggerMain"
+    End If
+    updateUi
+End Sub
+
+Public Sub updateStore()
     Dim uid As String
     uid = GetUID()
-    
     ' Get the text of the document
     Dim docText As String
     docText = ActiveDocument.Content.Text
@@ -252,14 +266,19 @@ Private Sub Document_Open()
     Else
         ' Handle the error
     End If
-    
+End Sub
+
+Public Sub EntryPoint()
+    Register_Event_Handler
+    updateStore
     ' Set the idle time to the current time
     X.idleTime = Now()
     X.mainTriggered = False
-    X.enabled = True
-    
+    X.Enabled = True
+    X.buttonState = True
+    isRunning = True
     ' Start timer to call ChangeDetector
-    Application.Run "TriggerMain"
+    ui.AddMenu
 End Sub
 
 Function GetKeyName(ByVal keyCode As WdKey, keyName) As String
@@ -335,6 +354,9 @@ Sub Complete()
 End Sub
 
 Public Sub main()
+    X.resetCompletion
+    On Error GoTo ErrHandler
+    Debug.Print "Generating Completion"
     ' Get the fragments and last two sentences
     Dim fragArray() As String
     Dim lastWritten As String
@@ -347,7 +369,6 @@ Public Sub main()
     ' Create the request body
     'Dim fragmentsJson As String
     'fragmentsJson = "[ """ & Join(fragArray, """ , """) & """ ]"
-    
     Dim jsonBody As Object
     Set jsonBody = CreateObject("Scripting.Dictionary")
     jsonBody("lastWritten") = lastWritten
@@ -357,19 +378,46 @@ Public Sub main()
     requestBody = ConvertToJson(jsonBody)
     
     ' Create and send the HTTP request
-    Dim request As Object
-    Set request = CreateObject("MSXML2.XMLHTTP")
-    request.Open "POST", "http://localhost:5000/completions", False
-    request.setRequestHeader "Content-Type", "application/json"
-    request.send requestBody
-
-    Dim jsonResponse As Object
-    Set jsonResponse = ParseJson(request.responseText)("data")
-    ' Display the response in a message box
-    AutoComplete (jsonResponse("lastWritten"))
+    Dim response As String
+    response = MakeRequest("http://localhost:5000/completions", "POST", requestBody)
+    
+    If Not response = "" Then
+        Dim jsonResponse As Object
+        Set jsonResponse = ParseJson(response)("data")
+        ' Display the response in a message box
+        AutoComplete (jsonResponse("response"))
+    Else
+        Debug.Print "Not Completing, response was empty."
+        Debug.Print response
+    End If
+    lastHash = currentHash()
+    X.mainTriggered = True
+    Exit Sub
+ErrHandler:
+    Debug.Print "An error occured trying to generate a completion"
+    X.resetCompletion
     lastHash = currentHash()
 End Sub
 
+Public Function updateUi()
+    Application.ScreenUpdating = False
+    Dim c As CommandBar, btn As CommandBarControl
+    Set c = CommandBars("Dektop Copilot")
+    
+    'Updating toggle-button
+    Set btn = c.FindControl(Tag:="toggle")
+    If X.buttonState Then
+        btn.FaceId = 2998
+        btn.Caption = "Active"
+    Else
+        btn.FaceId = 2997
+        btn.Caption = "Deactivated"
+    End If
+    
+    'Updating status text
+    
+    Application.ScreenUpdating = True
+End Function
 
 
 

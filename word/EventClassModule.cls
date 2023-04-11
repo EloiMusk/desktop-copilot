@@ -19,48 +19,59 @@ Public tabKey As KeyBinding
 Public escKey As KeyBinding
 Public idleTime As Date
 Private originalSelection(2) As Integer
-Public enabled As Boolean
+Public Enabled As Boolean
+Public buttonState As Boolean
 Public font As font
 
 Private Sub App_DocumentBeforeSave(ByVal Doc As Document, SaveAsUI As Boolean, Cancel As Boolean)
     Debug.Print "Before Save"
-    resetCompletion
+    'resetCompletion
 End Sub
+
+
+
+Function textSelected(sel As Selection) As Boolean
+    If sel.start < sel.End Then
+        textSelected = True
+    Else
+        textSelected = False
+    End If
+End Function
 
 Private Sub App_WindowActivate(ByVal Doc As Document, ByVal Wn As Window)
     Debug.Print "WindowAvtivate"
     resetCompletion
-    enabled = True
+    Enabled = True
 End Sub
 
 Private Sub App_WindowDeactivate(ByVal Doc As Document, ByVal Wn As Window)
     Debug.Print "WindowDeavtivate"
     resetCompletion
-    enabled = False
+    Enabled = False
 End Sub
 
 
 Private Sub App_WindowSelectionChange _
-    (ByVal Sel As Selection)
+    (ByVal sel As Selection)
     Debug.Print "Selection Changed"
-    enabled = True
-    originalSelection(0) = Sel.start
-    originalSelection(1) = Sel.End
+    Enabled = True
+    originalSelection(0) = sel.start
+    originalSelection(1) = sel.End
     resetCompletion True
 End Sub
 
 
 Public Function resetCompletion(Optional bySelection As Boolean = False)
+    On Error GoTo ErrHandler
     Debug.Print "Reseting Completion"
 
     If IsMissing(bySelection) Or bySelection = False Then
         startPos = Selection.start
     End If
     
-    
-    If Not completionLength = 0 Then
-        Dim delRange As Range
-        Set delRange = Selection.Range
+    Dim delRange As Range
+    Set delRange = Selection.Range.Duplicate
+    If Not completionLength = 0 And Not delRange Is Nothing Then
         delRange.SetRange startPos, (startPos + completionLength)
         delRange.font = font
         delRange.Delete
@@ -71,16 +82,19 @@ Public Function resetCompletion(Optional bySelection As Boolean = False)
         Selection.SetRange originalSelection(0), originalSelection(1)
     End If
     
-    If Not font Is Nothing Then
-        Selection.Paragraphs.Last.Range.font = font
+    If Not font Is Nothing And textSelected(Selection) Then
+        Selection.Range.font = font
     End If
     
+    resetParams
+    Exit Function
+ErrHandler:
+    Debug.Print "Error occured while resetting the completion"
     resetParams
 End Function
 
 Public Function resetParams()
     MakeRequest "http://localhost:5000/stop", "POST", ""
-
     
     mainTriggered = False
     originalSelection(0) = Selection.start
@@ -97,7 +111,6 @@ Public Function resetParams()
         escKey.Clear
     End If
 End Function
-
 Private Sub Doc_ContentControlBeforeStoreUpdate(ByVal ContentControl As ContentControl, Content As String)
     Debug.Print Content
 End Sub
